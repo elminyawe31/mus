@@ -1,0 +1,33 @@
+# Node
+node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# Environment
+.env
+.env.local
+.env.production
+.env.*.local
+
+# Cache & data
+audio_cache/
+cookies/cookies.txt
+database/*.json.bak
+logs/
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Test files
+_test_*.js
+_debug*.js
+
+# Build artifacts
+dist/
+build/

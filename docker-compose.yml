@@ -1,0 +1,102 @@
+# ═══════════════════════════════════════════════════════════════════════════
+#  docker-compose.yml — MUS Bot v26.1 (Dev: ELMINYAWE 👨‍💻)
+#  ─────────────────────────────────────────────────────────────────────────
+#  الاستخدام المحلي (للتطوير):
+#    1. عدّل قيم DISCORD_TOKEN و CLIENT_ID أسفله
+#    2. docker-compose up -d --build
+#    3. docker-compose logs -f mus
+#
+#  للنشر على Railway، استخدم README.md
+# ═══════════════════════════════════════════════════════════════════════════
+
+services:
+  mus:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mus-bot
+    restart: unless-stopped
+    environment:
+      # ── مطلوب إجباري ──
+      DISCORD_TOKEN: "ضع_توكن_البوت_هنا"
+      CLIENT_ID: "ضع_اي_دي_التطبيق_هنا"
+      GUILD_ID: ""
+
+      # ── Spotify مدمجة في الكود (config.js) — لا حاجة لإضافتها هنا ──
+      # لتجاوزها، أضف: SPOTIFY_CLIENT_ID و SPOTIFY_CLIENT_SECRET
+      SPOTIFY_MARKET: "US"
+
+      # ── اختياري: Genius (لكلمات الأغاني) ──
+      GENIUS_CLIENT_ID: ""
+      GENIUS_CLIENT_SECRET: ""
+
+      # ── إعدادات البوت ──
+      EMBED_COLOR: "#FF6B6B"
+      STATUS: "Dev : ELMINYAWE"
+      DEFAULT_VOLUME: "100"
+      MAX_QUEUE_SIZE: "100"
+      MAX_PLAYLIST_SIZE: "50"
+
+      # ── الأوامر الهجينة ──
+      PREFIX: "!"
+      ENABLE_PREFIX: "true"
+      ENABLE_SLASH: "true"
+      PREFIX_ADMIN_ONLY: "false"
+
+      # ── Sharding ──
+      TOTAL_SHARDS: "auto"
+      SHARD_MODE: "process"
+      SHARD_RESPAWN: "true"
+
+      # ── Resilience (نظام التوقعات) ──
+      EMPTY_VOICE_TIMEOUT_MS: "300000"
+      RECONNECT_TIMEOUT_MS: "10000"
+      MAX_RECONNECT_ATTEMPTS: "3"
+      CLEANUP_DELAY_MS: "2000"
+      AUTO_RESUME: "true"
+      PERSIST_PLAYER_STATE: "true"
+      STATE_PERSIST_DELAY_MS: "3000"
+
+      # ── YouTube / yt-dlp ──
+      YT_CONNECTION_MODE: "auto"
+      YT_PLAYER_CLIENTS: "android_music,web_safari,web,ios"
+      YT_JS_RUNTIMES: "deno"
+      YT_AUTO_COOKIES_FILE: "/app/cookies/cookies.txt"
+      YT_PROXY: "socks5://127.0.0.1:1080"
+      YT_COOKIES_INTERVAL_SEC: "21600"
+      YOUTUBE_DL_DIR: "/usr/local/bin"
+      YOUTUBE_DL_FILENAME: "yt-dlp-py"
+
+      # ── elminyawe ──
+      ELMINYAWE_ENABLED: "true"
+      BGUTIL_PORT: "4416"
+      WARP_SOCKS_PORT: "1080"
+
+    ports:
+      - "4416:4416"
+
+    volumes:
+      - mus-data:/app/data
+      - mus-cookies:/app/cookies
+
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:4416/ping"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 120s
+
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "2.0"
+        reservations:
+          memory: 256M
+          cpus: "0.5"
+
+volumes:
+  mus-data:
+    driver: local
+  mus-cookies:
+    driver: local

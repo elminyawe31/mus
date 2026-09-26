@@ -1,0 +1,35 @@
+# ملفات لا تُنسخ إلى صورة Docker
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ملفات البيئة المحلية
+.env
+.env.local
+.env.production
+.env.*.local
+
+# مجلدات مؤقتة
+.git/
+.gitignore
+audio_cache/
+*.log
+logs/
+
+# ملفات نظام
+.DS_Store
+Thumbs.db
+
+# ملفات IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# اختبارات ومستندات
+_test_*.js
+_debug*.js
+
+# ملفات Windows
+*.bat
