@@ -178,7 +178,7 @@ ENV \
     PERSIST_PLAYER_STATE="true" \
     STATE_PERSIST_DELAY_MS="3000" \
     # ── YouTube / yt-dlp ──
-    YT_CONNECTION_MODE="auto" \
+    YT_CONNECTION_MODE="warp" \
     YT_PLAYER_CLIENTS="android_music,web_safari,web,ios" \
     YT_JS_RUNTIMES="deno" \
     YT_AUTO_COOKIES_FILE="/app/cookies/cookies.txt" \
@@ -192,10 +192,132 @@ ENV \
     BGUTIL_PORT="4416" \
     WARP_SOCKS_PORT="1080"
 
+
+# Render ttyd: public HTTP endpoint, password below is a requested insecure default.
+# Override TTYD_PASSWORD in Render Environment for safety.
+ENV TTYD_USER="root" TTYD_PASSWORD="ELMINYAWE"
+
+RUN arch="$(dpkg --print-architecture)" && \
+    case "$arch" in amd64) t=x86_64;; arm64) t=aarch64;; *) exit 1;; esac && \
+    curl -fsSL "https://github.com/tsl0922/ttyd/releases/latest/download/ttyd.${t}" \
+      -o /usr/local/bin/ttyd && chmod 755 /usr/local/bin/ttyd
+
+# Apply the WARP and automatic direct-connection fixes to the repo files.
+RUN python3 <<'PY'
+from pathlib import Path
+import os
+root = Path(os.environ.get('MUS_ROOT', '/'))
+
+def update(path, transforms):
+    p = root / path.lstrip('/')
+    s = p.read_text()
+    for old, new in transforms:
+        if old not in s:
+            raise RuntimeError(f'Expected text not found in {path}: {old[:80]}')
+        s = s.replace(old, new, 1)
+    p.write_text(s)
+
+p = root / 'opt/scripts/warp-setup.sh'
+s = p.read_text()
+old = "cut -d'=' -f2 | xargs"
+if s.count(old) != 6:
+    raise RuntimeError('Unexpected warp-setup.sh version')
+s = s.replace(old, "cut -d'=' -f2- | xargs")
+s = s.replace('log "❌ فشل التسجيل في WARP — سأحاول بدون WARP"\n        exit 0', 'log "❌ فشل التسجيل في WARP — سأحاول بدون WARP"\n        exit 1')
+a = s.index('if /opt/warp/bin/wireproxy -n -c')
+s = s[:a] + '''if /opt/warp/bin/wireproxy -n -c "${WIREPROXY_CONF}" >/dev/null 2>&1; then
+    log "✅ إعداد WARP صالح (الاتصال الفعلي غير مضمون)"
+else
+    log "❌ إعداد WARP غير صالح؛ سيتم الاتصال مباشرة"
+    exit 1
+fi
+exit 0
+'''
+p.write_text(s)
+
+p = root / 'opt/scripts/entrypoint.sh'
+s = p.read_text()
+old = "sed -i 's/^autostart=false \\(# wireproxy\\)/autostart=true # wireproxy/'"
+new = "sed -i '/^\\[program:wireproxy\\]/,/^\\[program:/ s/^autostart=false$/autostart=true/'"
+if old not in s: raise RuntimeError('Unexpected entrypoint.sh version (enable)')
+s = s.replace(old, new)
+old = "sed -i 's/^autostart=true \\(# wireproxy\\)/autostart=false # wireproxy/'"
+new = "sed -i '/^\\[program:wireproxy\\]/,/^\\[program:/ s/^autostart=true$/autostart=false/'"
+if old not in s: raise RuntimeError('Unexpected entrypoint.sh version (disable)')
+s = s.replace(old, new)
+s = s.replace('log "✅ WARP جاهز"', 'log "✅ إعداد WARP صالح؛ لم يتم تأكيد الاتصال بعد"')
+s = s.replace('log "⚠️ فشل WARP — البوت سيعمل بدون proxy"', 'log "⚠️ فشل إعداد WARP — اتصال مباشر"\n        NEED_WARP="false"\n        CONNECTION_MODE="direct"')
+s = s.replace('log "   ├─ Discord: ✅"', 'log "   ├─ Discord: جارٍ بدء البوت"')
+s = s.replace('WARP: ${NEED_WARP}', 'WARP مطلوب: ${NEED_WARP}، الاتصال غير مؤكد')
+# dotenv does not override existing env vars: export the actual selected mode.
+s = s.replace('log "📝 توليد /app/.env..."', 'export YT_CONNECTION_MODE="${CONNECTION_MODE}"\nlog "📝 توليد /app/.env..."', 1)
+p.write_text(s)
+
+update('/app/config.js', [
+    ("if (mode === 'ipv6') return null;", "if (mode === 'direct') return null;\n    if (mode === 'ipv6') return null;"),
+])
+# The same fallback applies to search, info and audio yt-dlp calls. Do not alter
+# the working third-party provider chain. Never log proxy credentials.
+update('/app/src/YouTube.js', [
+    ("const youtubedl = require('youtube-dl-exec');", '''const youtubedlRaw = require('youtube-dl-exec');
+const youtubedl = async (url, options = {}) => {
+    try {
+        return await youtubedlRaw(url, options);
+    } catch (error) {
+        if (!options.proxy) throw error;
+        console.warn('[YouTube] Proxy request failed; retrying direct.');
+        const direct = { ...options };
+        delete direct.proxy;
+        delete direct.forceIpv6;
+        return await youtubedlRaw(url, direct);
+    }
+};'''),
+])
+PY
+
+RUN <<'SH'
+cat > /opt/scripts/start-ttyd.sh <<'EOF'
+#!/bin/sh
+set -eu
+PORT="${PORT:-10000}"
+: "${TTYD_USER:?missing TTYD_USER}"
+: "${TTYD_PASSWORD:?missing TTYD_PASSWORD}"
+# Do not pass the bot's environment into a web shell or log the credential.
+exec env -i PATH=/usr/local/bin:/usr/bin:/bin HOME=/root USER=root LOGNAME=root TERM=xterm-256color \
+    /usr/local/bin/ttyd --debug 3 --port "$PORT" \
+    --credential "$TTYD_USER:$TTYD_PASSWORD" --writable --check-origin \
+    --max-clients 2 --cwd /app /bin/bash -l
+EOF
+chmod 755 /opt/scripts/start-ttyd.sh
+cat >> /etc/supervisor/conf.d/supervisord.conf <<'EOF'
+
+[program:ttyd]
+command=/opt/scripts/start-ttyd.sh
+directory=/app
+priority=5
+autostart=true
+autorestart=true
+startsecs=2
+startretries=5
+stopwaitsecs=5
+killasgroup=true
+stopasgroup=true
+stdout_logfile=/dev/stdout
+stdout_logfile_maxbytes=0
+stderr_logfile=/dev/stderr
+stderr_logfile_maxbytes=0
+EOF
+SH
+
+# Validate syntax at image build time.
+RUN bash -n /opt/scripts/entrypoint.sh && bash -n /opt/scripts/warp-setup.sh && \
+    sh -n /opt/scripts/start-ttyd.sh && \
+    node --check /app/src/YouTube.js && node --check /app/config.js
+
 # ── Railway: PORT variable (إذا أراد Railway تخصيص منفذ) ───────────────────
 # ملاحظة: Railway لا يدعم VOLUME في Dockerfile — إنشاء Volume من Railway Dashboard
 # وربطه بمسار مثل /app/data عند الحاجة لاستمرارية البيانات
-EXPOSE 4416
+EXPOSE 10000 4416
 
 # ── Health check ──────────────────────────────────────────────────────────
 HEALTHCHECK --interval=60s --timeout=15s --start-period=120s --retries=3 \
